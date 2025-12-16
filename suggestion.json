@@ -1,0 +1,24 @@
+
+
+    
+    [{"Strings": [
+        {
+            "name": "E",
+            "status": "open",
+            "fret": 3,
+            "finger": 1,
+            "note": "G2"
+
+        },
+        {
+            "name": "A",
+            "status": "skip",
+            "fret": null,
+            "finger": null,
+            "note": null
+
+        }
+]
+}
+    ]
+    
