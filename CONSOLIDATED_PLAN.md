@@ -367,11 +367,14 @@ export function ChordPreview({ data }: { data: ChordData }) {
   "key": "read_chord_data",
   "type": "item-read",
   "collection": "chord_data",
+  "key": "{{ $trigger.key }}",
   "query": {
     "fields": ["*", "json"]
   }
 }
 ```
+
+**Note**: `{{ $trigger.key }}` contains the ID of the item that triggered the Flow (from the event trigger).
 
 #### Operation 2: Generate SVG (Exec)
 
@@ -407,6 +410,20 @@ export function ChordPreview({ data }: { data: ChordData }) {
 
 **Note**: May need to use Directus SDK operation instead of raw request.
 
+#### Operation 3.5: Merge JSON with SVG File Reference
+
+Since Directus Flow doesn't support nested JSON merging directly in the update operation, use an `exec` operation to properly merge the existing JSON with the SVG file reference:
+
+```json
+{
+  "key": "merge_json",
+  "type": "exec",
+  "code": "module.exports = async function(data) {\n  const existingJson = data.read_chord_data.json;\n  const svgFile = {\n    id: data.upload_svg.data.id,\n    url: data.upload_svg.data.url,\n    filename: data.upload_svg.data.filename_disk\n  };\n  \n  // Merge existing JSON with SVG file reference using object spread\n  // This preserves all existing properties (chord_type, instrument, positions, keys, etc.)\n  const mergedJson = Object.assign({}, existingJson, {\n    svg_file: svgFile,\n    generated_at: new Date().toISOString()\n  });\n  \n  // Return the merged JSON object directly (not stringified)\n  // Directus Flow will handle serialization when updating the field\n  return { merged_json: mergedJson };\n}"
+}
+```
+
+**Note**: The exec operation uses `Object.assign()` to properly merge the existing JSON object properties with the new `svg_file` and `generated_at` fields. This preserves all original chord data fields (like `chord_type`, `instrument`, `positions`, `keys`, `hand`, `fingering`) while adding the SVG file reference.
+
 #### Operation 4: Update Chord Data with File Reference
 
 ```json
@@ -414,20 +431,32 @@ export function ChordPreview({ data }: { data: ChordData }) {
   "key": "update_chord_data",
   "type": "item-update",
   "collection": "chord_data",
-  "key": "{{ read_chord_data.id }}",
+  "key": "{{ $trigger.key }}",
   "data": {
-    "json": {
-      "{{ read_chord_data.json }}": "{{ read_chord_data.json }}",
-      "svg_file": {
-        "id": "{{ upload_svg.data.id }}",
-        "url": "{{ upload_svg.data.url }}",
-        "filename": "{{ upload_svg.data.filename_disk }}"
-      },
-      "generated_at": "{{ $trigger.date_created }}"
-    }
+    "json": "{{ merge_json.merged_json }}"
   }
 }
 ```
+
+**Important**: 
+- Using `{{ $trigger.key }}` ensures we update the same item that triggered the Flow
+- The `merged_json` property from the exec operation contains the complete merged JSON object
+- Directus Flow will properly serialize this as a JSON field value (not a string key)
+- All original chord data fields are preserved in the merged object
+
+**Alternative Approach** (if Directus Flow serializes JSON incorrectly):
+
+If the template variable approach doesn't work correctly, have the exec operation perform the update directly:
+
+```json
+{
+  "key": "merge_and_update",
+  "type": "exec",
+  "code": "module.exports = async function(data) {\n  const { Services } = require('@directus/api');\n  const { ItemsService } = Services;\n  \n  const existingJson = data.read_chord_data.json;\n  const svgFile = {\n    id: data.upload_svg.data.id,\n    url: data.upload_svg.data.url,\n    filename: data.upload_svg.data.filename_disk\n  };\n  \n  const mergedJson = Object.assign({}, existingJson, {\n    svg_file: svgFile,\n    generated_at: new Date().toISOString()\n  });\n  \n  // Update directly using Directus SDK\n  const itemsService = new ItemsService('chord_data', { schema: data.$accountability.schema });\n  await itemsService.updateOne(data.$trigger.key, { json: mergedJson });\n  \n  return { success: true };\n}"
+}
+```
+
+**Note**: This alternative requires the Directus SDK to be available in the exec environment and combines the merge and update into a single operation.
 
 ### 3.3 Server Dependencies
 
